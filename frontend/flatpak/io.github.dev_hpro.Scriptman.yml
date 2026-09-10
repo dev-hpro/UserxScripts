@@ -1,0 +1,44 @@
+id: io.github.dev_hpro.Scriptman
+
+runtime: org.freedesktop.Platform
+runtime-version: "24.08"
+sdk: org.freedesktop.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.golang
+
+command: scriptman
+
+# Tudo em userspace, sem tocar no host além do necessário para rodar os scripts:
+#   --share=network            checar/baixar atualizações do repositório no GitHub
+#   --talk-name=org.freedesktop.Flatpak
+#                              permite usar `flatpak-spawn --host` pra executar os scripts
+#                              de verdade no sistema (eles alteram $HOME real; rodar dentro
+#                              do sandbox não teria efeito nenhum). Não usa --filesystem=host:
+#                              os scripts baixados já ficam em ~/.var/app/<id>/cache, que é
+#                              um caminho real dentro do $HOME do usuário.
+finish-args:
+  - --share=network
+  - --talk-name=org.freedesktop.Flatpak
+
+build-options:
+  append-path: /usr/lib/sdk/golang/bin
+  env:
+    GOFLAGS: -mod=vendor
+    GOPROXY: "off"
+    GOCACHE: /run/build/scriptman/go-cache
+
+# O módulo Go é vendorizado (frontend/vendor/, via `go mod vendor`) justamente pra o build
+# do Flatpak não precisar de rede — flatpak-builder roda os build-commands sem acesso à
+# internet por padrão.
+modules:
+  - name: scriptman
+    buildsystem: simple
+    build-commands:
+      - go build -mod=vendor -o scriptman .
+      - install -Dm755 scriptman /app/bin/scriptman
+      - install -Dm644 io.github.dev_hpro.Scriptman.desktop /app/share/applications/io.github.dev_hpro.Scriptman.desktop
+      - install -Dm644 io.github.dev_hpro.Scriptman.metainfo.xml /app/share/metainfo/io.github.dev_hpro.Scriptman.metainfo.xml
+      - install -Dm644 icon.svg /app/share/icons/hicolor/scalable/apps/io.github.dev_hpro.Scriptman.svg
+    sources:
+      - type: dir
+        path: ..

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Scriptman
+Comment=Gerenciador dos scripts do UserxScripts
+Exec=scriptman
+Icon=io.github.dev_hpro.Scriptman
+Terminal=true
+Categories=Utility;System;
+Keywords=scripts;shell;ai-cli;automação;

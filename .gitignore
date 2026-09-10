@@ -6,3 +6,10 @@ docs/.obsidian/
 
 # diversos
 .DS_Store
+
+# Scriptman (frontend) — artefatos de build, não o vendor/ (esse é comitado de propósito
+# pra o build do Flatpak não precisar de rede)
+frontend/build-dir/
+frontend/.flatpak-builder/
+/scriptman
+frontend/scriptman

@@ -13,3 +13,7 @@ Vault do Obsidian com a documentação de todos os scripts do repositório [[../
 
 - [[linux/sistema/ai-cli-cleaner]] — detecta e remove CLIs de IA instaladas (claude, gemini, kimi, etc.), em três níveis (básico/completo/purge)
 - [[linux/sistema/ai-cli-uninstaller]] — mesma detecção, mas seleção granular item por item (cache, dados, credenciais, pacote, binário), com tamanho de cada um
+
+## Frontend
+
+- [[frontend/scriptman]] — TUI (Go/Bubbletea) que lista, documenta e executa todos os scripts do repositório; também empacotado como Flatpak com auto-atualização a partir do GitHub

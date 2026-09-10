@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.dev_hpro.Scriptman</id>
+  <name>Scriptman</name>
+  <summary>Gerenciador dos scripts do UserxScripts</summary>
+  <metadata_license>MIT</metadata_license>
+  <project_license>MIT</project_license>
+  <description>
+    <p>
+      TUI para descobrir, documentar e executar os scripts do repositório UserxScripts
+      (dev-hpro/UserxScripts no GitHub). Mantém uma cópia local atualizada automaticamente
+      a partir do repositório e executa o script escolhido de verdade no sistema.
+    </p>
+  </description>
+  <launchable type="desktop-id">io.github.dev_hpro.Scriptman.desktop</launchable>
+  <url type="homepage">https://github.com/dev-hpro/UserxScripts</url>
+  <content_rating type="oars-1.1" />
+  <releases>
+    <release version="0.1.0" date="2026-09-10">
+      <description>
+        <p>Primeira versão: catálogo navegável, documentação renderizada, execução no host e auto-atualização a partir do GitHub.</p>
+      </description>
+    </release>
+  </releases>
+</component>
