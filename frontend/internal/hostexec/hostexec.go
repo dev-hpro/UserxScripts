@@ -27,6 +27,14 @@ var envForwardVars = []string{"TERM", "COLORTERM", "LANG", "LC_ALL", "LC_CTYPE"}
 // Quem chamar é responsável por conectar Stdin/Stdout/Stderr (ex: via tea.ExecProcess).
 func BuildCommand(scriptPath string, args []string) *exec.Cmd {
 	if InFlatpak() {
+		// scriptPath aqui é sempre a cópia baixada em nosso próprio cache — não o
+		// repositório original. Forçar +x é defensivo: um arquivo pode chegar sem
+		// o bit de execução por qualquer detalhe do jeito como foi commitado/
+		// baixado (já aconteceu: um arquivo criado via API do GitHub sem o modo
+		// certo), e sem +x o exec falha com "permission denied" e o script nem
+		// chega a rodar.
+		_ = os.Chmod(scriptPath, 0o755)
+
 		full := []string{"--host"}
 		for _, v := range envForwardVars {
 			if val := os.Getenv(v); val != "" {
