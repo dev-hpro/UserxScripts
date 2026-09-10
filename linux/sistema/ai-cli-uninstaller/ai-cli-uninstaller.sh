@@ -7,6 +7,12 @@
 # liberado com a seleção atual. Também restaura um backup feito anteriormente
 # (compatível com os backups do ai-cli-cleaner.sh — mesmo formato/pasta).
 #
+# TUI: usa gum (https://github.com/charmbracelet/gum) se estiver instalado,
+# com fallback pra whiptail e depois pra menu numerado em texto puro — roda
+# em qualquer máquina mesmo sem nenhum dos dois instalados. Instalar o gum
+# (não precisa de root): baixar o binário estático da release em
+# github.com/charmbracelet/gum/releases e colocar em ~/.local/bin/gum.
+#
 # Documentação: docs/linux/sistema/ai-cli-uninstaller.md
 #
 # Uso:
@@ -71,6 +77,9 @@ TOOLS=(
   "deepseek|DeepSeek CLI|deepseek|deepseek-cli||$HOME/.cache/deepseek||$HOME/.deepseek,$HOME/.config/deepseek"
 )
 
+HAS_GUM=0
+command -v gum >/dev/null 2>&1 && HAS_GUM=1
+
 HAS_WHIPTAIL=0
 command -v whiptail >/dev/null 2>&1 && HAS_WHIPTAIL=1
 
@@ -96,10 +105,33 @@ log() {
   printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$1" >>"$LOG_FILE"
 }
 
-info() { printf '\033[1;34m[INFO]\033[0m %s\n' "$1"; log "INFO: $1"; }
-ok()   { printf '\033[1;32m[ OK ]\033[0m %s\n' "$1"; log "OK: $1"; }
-warn() { printf '\033[1;33m[WARN]\033[0m %s\n' "$1"; log "WARN: $1"; }
-err()  { printf '\033[1;31m[ERRO]\033[0m %s\n' "$1" >&2; log "ERRO: $1"; }
+info() {
+  if [[ "$HAS_GUM" -eq 1 ]]; then gum style --foreground 39 --bold "▸ $1"
+  else printf '\033[1;34m[INFO]\033[0m %s\n' "$1"; fi
+  log "INFO: $1"
+}
+ok() {
+  if [[ "$HAS_GUM" -eq 1 ]]; then gum style --foreground 42 --bold "✓ $1"
+  else printf '\033[1;32m[ OK ]\033[0m %s\n' "$1"; fi
+  log "OK: $1"
+}
+warn() {
+  if [[ "$HAS_GUM" -eq 1 ]]; then gum style --foreground 214 --bold "⚠ $1"
+  else printf '\033[1;33m[WARN]\033[0m %s\n' "$1"; fi
+  log "WARN: $1"
+}
+err() {
+  if [[ "$HAS_GUM" -eq 1 ]]; then gum style --foreground 196 --bold "✗ $1" >&2
+  else printf '\033[1;31m[ERRO]\033[0m %s\n' "$1" >&2; fi
+  log "ERRO: $1"
+}
+
+banner() {
+  [[ "$HAS_GUM" -eq 1 ]] || return 0
+  gum style --border rounded --padding "0 2" --margin "1 0" \
+    --border-foreground 212 --foreground 212 --bold \
+    "ai-cli-uninstaller"
+}
 
 usage() {
   cat <<'EOF'
@@ -108,6 +140,8 @@ por item (cache, dados/sessões, credenciais/config, pacote, binário), de
 qualquer combinação de ferramentas, o que apagar ou desinstalar. Mostra o
 tamanho de cada item e o total a liberar. Restaura backups (mesmo formato do
 ai-cli-cleaner.sh).
+
+TUI: gum se instalado, senão whiptail, senão menu numerado em texto puro.
 
 Uso:
   ./ai-cli-uninstaller.sh             fluxo interativo completo
@@ -198,6 +232,27 @@ kind_label() {
     cache) printf 'cache/temporários' ;;
     data)  printf 'dados/sessões' ;;
     keep)  printf 'credenciais/config' ;;
+  esac
+}
+
+# Caminho/tamanho a exibir para o item $1 (índice em ITEM_*). Para "bin", o
+# caminho de verdade fica em ITEM_EXTRA (ITEM_REF é só o nome do comando) —
+# nos demais tipos é o contrário: ITEM_REF é o caminho/pacote e ITEM_EXTRA é
+# o tamanho (ou vazio, pra npm/pip/pipx).
+item_display_path() {
+  local idx="$1"
+  if [[ "${ITEM_KIND[$idx]}" == "bin" ]]; then
+    printf '%s' "${ITEM_EXTRA[$idx]}"
+  else
+    printf '%s' "${ITEM_REF[$idx]}"
+  fi
+}
+
+item_display_size() {
+  local idx="$1"
+  case "${ITEM_KIND[$idx]}" in
+    cache|data|keep) printf '%s' "${ITEM_EXTRA[$idx]:--}" ;;
+    *) printf '%s' "-" ;;
   esac
 }
 
@@ -311,25 +366,70 @@ print_items_report() {
     ok "Nenhum rastro de CLI de IA conhecida foi encontrado neste sistema."
     return
   fi
-  echo
-  local last_tool="" i total=0
+  local i total=0
   for i in "${!ITEM_TOOL[@]}"; do
-    if [[ "${ITEM_TOOL[$i]}" != "$last_tool" ]]; then
-      last_tool="${ITEM_TOOL[$i]}"
-      echo
-      printf '\033[1m%s (%s)\033[0m\n' "$(tool_display_name "$last_tool")" "$last_tool"
-    fi
-    printf '  [%3d] %-20s %-60s %10s\n' "$((i + 1))" "$(kind_label "${ITEM_KIND[$i]}")" "${ITEM_REF[$i]}" "${ITEM_EXTRA[$i]:--}"
     total=$((total + ITEM_BYTES[i]))
   done
-  echo
+
+  if [[ "$HAS_GUM" -eq 1 ]]; then
+    {
+      for i in "${!ITEM_TOOL[@]}"; do
+        printf '%d\t%s\t%s\t%s\t%s\n' \
+          "$((i + 1))" \
+          "$(tool_display_name "${ITEM_TOOL[$i]}")" \
+          "$(kind_label "${ITEM_KIND[$i]}")" \
+          "$(item_display_path "$i")" \
+          "$(item_display_size "$i")"
+      done
+    } | gum table -s $'\t' -c "#,Ferramenta,Tipo,Caminho,Tamanho" --print
+  else
+    echo
+    local last_tool=""
+    for i in "${!ITEM_TOOL[@]}"; do
+      if [[ "${ITEM_TOOL[$i]}" != "$last_tool" ]]; then
+        last_tool="${ITEM_TOOL[$i]}"
+        echo
+        printf '\033[1m%s (%s)\033[0m\n' "$(tool_display_name "$last_tool")" "$last_tool"
+      fi
+      printf '  [%3d] %-20s %-60s %10s\n' "$((i + 1))" "$(kind_label "${ITEM_KIND[$i]}")" "$(item_display_path "$i")" "$(item_display_size "$i")"
+    done
+    echo
+  fi
+
   info "Consumo total detectado: $(human_from_bytes "$total")"
   echo
 }
 
 # ---------------------------------------------------------------------------
-# Seleção (whiptail ou fallback em texto puro) — itens, não ferramentas
+# Seleção (gum, com fallback pra whiptail e depois texto puro) — itens, não
+# ferramentas
 # ---------------------------------------------------------------------------
+
+# Cada opção é prefixada com "[NNN]" — depois de escolhido, é assim que
+# reconstruímos o índice (ver parse_gum_choice_indices). O gum devolve o
+# texto exato das opções selecionadas, uma por linha, via stdout.
+select_items_gum() {
+  local i options=() height
+  for i in "${!ITEM_TOOL[@]}"; do
+    options+=("$(printf '[%3d] %s · %s · %s (%s)' \
+      "$((i + 1))" \
+      "$(tool_display_name "${ITEM_TOOL[$i]}")" \
+      "$(kind_label "${ITEM_KIND[$i]}")" \
+      "$(item_display_path "$i")" "$(item_display_size "$i")")")
+  done
+  height=$(( ${#options[@]} < 15 ? ${#options[@]} + 1 : 15 ))
+  printf '%s\n' "${options[@]}" | gum choose --no-limit --height="$height" \
+    --header="Selecione (ESPAÇO) os itens a apagar/desinstalar e confirme com ENTER:" \
+    --cursor.foreground=212 --selected.foreground=212 --header.foreground=99
+}
+
+# Extrai o número de dentro de "[NNN] ..." de cada linha selecionada.
+parse_gum_choice_indices() {
+  local line
+  while IFS= read -r line; do
+    [[ "$line" =~ ^\[[[:space:]]*([0-9]+)\] ]] && printf '%s\n' "${BASH_REMATCH[1]}"
+  done
+}
 
 select_items_whiptail() {
   local args=(--title "ai-cli-uninstaller" --checklist \
@@ -337,7 +437,7 @@ select_items_whiptail() {
     24 100 16)
   local i label
   for i in "${!ITEM_TOOL[@]}"; do
-    label="$(tool_display_name "${ITEM_TOOL[$i]}") · $(kind_label "${ITEM_KIND[$i]}") · ${ITEM_REF[$i]} (${ITEM_EXTRA[$i]:--})"
+    label="$(tool_display_name "${ITEM_TOOL[$i]}") · $(kind_label "${ITEM_KIND[$i]}") · $(item_display_path "$i") ($(item_display_size "$i"))"
     args+=("$((i + 1))" "$label" OFF)
   done
   whiptail "${args[@]}" 3>&1 1>&2 2>&3
@@ -486,21 +586,40 @@ restore_flow() {
     return
   fi
 
-  echo "Backups disponíveis (mais recente primeiro):"
-  local i=1 b
-  for b in "${backups[@]}"; do
-    printf '  %d) %s (%s)\n' "$i" "$(basename "$b")" "$(human_size "$b")"
-    i=$((i + 1))
-  done
-  echo
-  local choice
-  read -r -p "Escolha o backup a restaurar (número, vazio para cancelar): " choice
-  [[ -z "$choice" ]] && { warn "Cancelado."; return; }
-  if [[ ! "$choice" =~ ^[0-9]+$ ]]; then
-    err "Escolha inválida."
-    return
+  local idx=-1 i=1 b
+
+  if [[ "$HAS_GUM" -eq 1 ]]; then
+    local options=()
+    for b in "${backups[@]}"; do
+      options+=("$(printf '[%3d] %s (%s)' "$i" "$(basename "$b")" "$(human_size "$b")")")
+      i=$((i + 1))
+    done
+    local picked
+    picked="$(printf '%s\n' "${options[@]}" | gum choose --limit=1 \
+      --header="Escolha o backup a restaurar:" \
+      --cursor.foreground=212 --selected.foreground=212 --header.foreground=99)"
+    if [[ -z "$picked" ]]; then
+      warn "Cancelado."
+      return
+    fi
+    [[ "$picked" =~ ^\[[[:space:]]*([0-9]+)\] ]] && idx=$((BASH_REMATCH[1] - 1))
+  else
+    echo "Backups disponíveis (mais recente primeiro):"
+    for b in "${backups[@]}"; do
+      printf '  %d) %s (%s)\n' "$i" "$(basename "$b")" "$(human_size "$b")"
+      i=$((i + 1))
+    done
+    echo
+    local choice
+    read -r -p "Escolha o backup a restaurar (número, vazio para cancelar): " choice
+    [[ -z "$choice" ]] && { warn "Cancelado."; return; }
+    if [[ ! "$choice" =~ ^[0-9]+$ ]]; then
+      err "Escolha inválida."
+      return
+    fi
+    idx=$((choice - 1))
   fi
-  local idx=$((choice - 1))
+
   if [[ "$idx" -lt 0 || "$idx" -ge "${#backups[@]}" ]]; then
     err "Escolha inválida."
     return
@@ -529,8 +648,15 @@ restore_flow() {
     echo "  - $m"
   done
   echo
-  read -r -p "Restaurar esses caminhos para o sistema? Pode sobrescrever dados atuais. [s/N] " confirm
-  if [[ ! "$confirm" =~ ^[sS]$ ]]; then
+  local proceed=1
+  if [[ "$HAS_GUM" -eq 1 ]]; then
+    gum confirm "Restaurar esses caminhos para o sistema? Pode sobrescrever dados atuais." || proceed=0
+  else
+    local confirm
+    read -r -p "Restaurar esses caminhos para o sistema? Pode sobrescrever dados atuais. [s/N] " confirm
+    [[ "$confirm" =~ ^[sS]$ ]] || proceed=0
+  fi
+  if [[ "$proceed" -eq 0 ]]; then
     warn "Cancelado."
     rm -rf "$extract_dir"
     return
@@ -570,7 +696,7 @@ print_selection_summary() {
     printf '  - %s · %s: %s (%s)\n' \
       "$(tool_display_name "${ITEM_TOOL[$idx]}")" \
       "$(kind_label "${ITEM_KIND[$idx]}")" \
-      "${ITEM_REF[$idx]}" "${ITEM_EXTRA[$idx]:--}"
+      "$(item_display_path "$idx")" "$(item_display_size "$idx")"
     if [[ "${ITEM_TOOL[$idx]}" == "claude" && "${ITEM_REF[$idx]}" == *"/projects" ]]; then
       warn "    atenção: inclui a pasta de memória entre sessões do Claude Code (subpasta memory/)."
     fi
@@ -648,6 +774,8 @@ main() {
   mkdir -p "$STATE_DIR" "$LOG_DIR" "$BACKUP_ROOT"
   log "=== Início da execução (dry_run=$DRY_RUN scan_only=$SCAN_ONLY restore=$RESTORE) ==="
 
+  banner
+
   if [[ "$RESTORE" -eq 1 ]]; then
     restore_flow
     exit 0
@@ -661,16 +789,20 @@ main() {
     exit 0
   fi
 
-  local selected_raw
-  if [[ "$HAS_WHIPTAIL" -eq 1 ]]; then
+  local SELECTED=()
+  if [[ "$HAS_GUM" -eq 1 ]]; then
+    mapfile -t SELECTED < <(select_items_gum | parse_gum_choice_indices)
+  elif [[ "$HAS_WHIPTAIL" -eq 1 ]]; then
+    local selected_raw
     selected_raw="$(select_items_whiptail)" || { warn "Cancelado."; exit 0; }
     selected_raw="$(tr -d '"' <<<"$selected_raw")"
+    read -ra SELECTED <<<"$selected_raw"
   else
+    local selected_raw
     selected_raw="$(select_items_plain)"
+    read -ra SELECTED <<<"$selected_raw"
   fi
 
-  local SELECTED
-  read -ra SELECTED <<<"$selected_raw"
   if [[ "${#SELECTED[@]}" -eq 0 ]]; then
     warn "Nenhum item selecionado. Nada será feito."
     exit 0
@@ -683,7 +815,12 @@ main() {
   if [[ "$ASSUME_YES" -ne 1 ]]; then
     echo
     warn "Esta ação é DESTRUTIVA. Há backup automático, mas restaurar é manual (--restore)."
-    read -r -p "Digite APAGAR para confirmar a operação acima: " confirm
+    local confirm
+    if [[ "$HAS_GUM" -eq 1 ]]; then
+      confirm="$(gum input --header="Digite APAGAR para confirmar a operação acima" --placeholder="APAGAR")"
+    else
+      read -r -p "Digite APAGAR para confirmar a operação acima: " confirm
+    fi
     if [[ "$confirm" != "APAGAR" ]]; then
       warn "Confirmação não corresponde a 'APAGAR'. Operação cancelada."
       exit 0
