@@ -16,15 +16,25 @@ var (
 			Bold(true).
 			Foreground(accent)
 
-	listBoxStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(muted).
+	baseBoxStyle = lipgloss.NewStyle().
 			Padding(0, 1)
 
-	detailBoxStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(muted).
-			Padding(0, 1)
+	// O painel com foco de teclado ganha borda grossa + cor de destaque; o outro
+	// fica com borda fina cinza — indica de forma clara qual painel vai reagir
+	// às teclas (lista navega/executa vs documentação rola).
+	listBoxStyleFocused = baseBoxStyle.
+				Border(lipgloss.ThickBorder()).
+				BorderForeground(accent)
+	listBoxStyleBlurred = baseBoxStyle.
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(muted)
+
+	detailBoxStyleFocused = baseBoxStyle.
+				Border(lipgloss.ThickBorder()).
+				BorderForeground(accent)
+	detailBoxStyleBlurred = baseBoxStyle.
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(muted)
 
 	helpStyle = lipgloss.NewStyle().Foreground(muted)
 

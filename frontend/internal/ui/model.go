@@ -25,6 +25,7 @@ type focusArea int
 
 const (
 	focusList focusArea = iota
+	focusDetail
 	focusArgs
 )
 
@@ -41,6 +42,7 @@ type Model struct {
 	focus       focusArea
 	width       int
 	height      int
+	listBoxW    int // largura renderizada da caixa da lista (com borda+padding), pra rotear mouse
 	ready       bool
 	statusMsg   string
 	checkingNow bool
@@ -82,6 +84,7 @@ func New(sourceDir string, checker *update.Checker) Model {
 	ti.CharLimit = 200
 
 	vp := viewport.New(0, 0)
+	vp.MouseWheelEnabled = true
 
 	renderer, _ := glamour.NewTermRenderer(
 		glamour.WithAutoStyle(),
@@ -161,6 +164,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if bodyH < 3 {
 			bodyH = 3
 		}
+		m.listBoxW = listW + boxOverhead + gap
 		m.list.SetSize(listW, bodyH)
 		m.viewport.Width = detailW
 		m.viewport.Height = bodyH
@@ -195,6 +199,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		return m.handleKey(msg)
+
+	case tea.MouseMsg:
+		// A roda do mouse controla o que estiver embaixo do cursor, direto —
+		// independe de qual painel está com foco de teclado no momento.
+		if msg.X < m.listBoxW {
+			switch msg.Button {
+			case tea.MouseButtonWheelUp:
+				m.list.CursorUp()
+				m.syncDetail()
+			case tea.MouseButtonWheelDown:
+				m.list.CursorDown()
+				m.syncDetail()
+			}
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.viewport, cmd = m.viewport.Update(msg)
+		return m, cmd
 	}
 
 	var cmd tea.Cmd
@@ -228,6 +250,19 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 
+	if m.focus == focusDetail {
+		switch msg.String() {
+		case "q", "ctrl+c":
+			return m, tea.Quit
+		case "tab", "esc":
+			m.focus = focusList
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.viewport, cmd = m.viewport.Update(msg)
+		return m, cmd
+	}
+
 	if m.list.FilterState() == list.Filtering {
 		var cmd tea.Cmd
 		m.list, cmd = m.list.Update(msg)
@@ -238,6 +273,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "q", "ctrl+c":
 		return m, tea.Quit
+	case "tab":
+		m.focus = focusDetail
+		return m, nil
 	case "u":
 		if m.checker != nil && !m.checkingNow {
 			m.checkingNow = true
@@ -286,7 +324,7 @@ func (m *Model) syncDetail() {
 	if s.DocPath != "" {
 		if doc, err := os.ReadFile(s.DocPath); err == nil {
 			b.WriteString("---\n\n")
-			b.Write(doc)
+			b.WriteString(stripFrontmatter(string(doc)))
 		}
 	} else {
 		b.WriteString("_(sem documentação em docs/ para este item)_\n")
@@ -307,18 +345,30 @@ func (m Model) View() string {
 		return "carregando..."
 	}
 
-	header := headerStyle.Width(m.width).Render("Scriptman — gerenciador de scripts")
+	header := headerStyle.Width(m.width).Render("📜 Scriptman — gerenciador de scripts")
 
-	listView := listBoxStyle.Render(m.list.View())
-	detailView := detailBoxStyle.Render(m.viewport.View())
+	listStyle, detailStyle := listBoxStyleBlurred, detailBoxStyleBlurred
+	if m.focus == focusDetail {
+		detailStyle = detailBoxStyleFocused
+	} else {
+		listStyle = listBoxStyleFocused
+	}
+
+	listView := listStyle.Render(m.list.View())
+	detailView := detailStyle.Render(m.viewport.View())
 	body := lipgloss.JoinHorizontal(lipgloss.Top, listView, " ", detailView)
 
 	var footer string
-	if m.focus == focusArgs {
-		footer = fmt.Sprintf("executar %s > %s", m.pendingRun.Name, m.argsIn.View())
-	} else {
-		footer = helpStyle.Render("↑/↓ navega · / busca · enter executa · u verifica atualização · q sai") +
-			"  |  " + statusStyle.Render(m.statusMsg)
+	switch m.focus {
+	case focusArgs:
+		footer = fmt.Sprintf("▸ executar %s   argumentos: %s", m.pendingRun.Name, m.argsIn.View())
+	case focusDetail:
+		scroll := fmt.Sprintf("%3.0f%%", m.viewport.ScrollPercent()*100)
+		footer = helpStyle.Render("documentação ("+scroll+") · ↑/↓ rola · pgup/pgdn/u/d página · tab volta pra lista · q sai") +
+			"  ·  " + statusStyle.Render(m.statusMsg)
+	default:
+		footer = helpStyle.Render("↑/↓ navega · / busca · tab → doc (rola com mouse/setas) · enter executa · u atualiza · q sai") +
+			"  ·  " + statusStyle.Render(m.statusMsg)
 	}
 
 	return lipgloss.JoinVertical(lipgloss.Left, header, body, footer)
@@ -329,4 +379,20 @@ func shortSHA(sha string) string {
 		return sha[:8]
 	}
 	return sha
+}
+
+// stripFrontmatter remove o cabeçalho YAML (--- ... ---) do início de um doc Markdown —
+// o glamour renderiza esse bloco como texto solto/regra horizontal, o que fica feio.
+func stripFrontmatter(md string) string {
+	trimmed := strings.TrimLeft(md, "\n")
+	if !strings.HasPrefix(trimmed, "---") {
+		return md
+	}
+	lines := strings.Split(trimmed, "\n")
+	for i := 1; i < len(lines); i++ {
+		if strings.TrimSpace(lines[i]) == "---" {
+			return strings.TrimLeft(strings.Join(lines[i+1:], "\n"), "\n")
+		}
+	}
+	return md
 }

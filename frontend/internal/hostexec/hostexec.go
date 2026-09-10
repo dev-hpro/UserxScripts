@@ -7,6 +7,7 @@ package hostexec
 import (
 	"os"
 	"os/exec"
+	"strings"
 )
 
 // InFlatpak diz se o processo atual está rodando dentro de um sandbox Flatpak.
@@ -32,9 +33,28 @@ func BuildCommand(scriptPath string, args []string) *exec.Cmd {
 				full = append(full, "--env="+v+"="+val)
 			}
 		}
-		full = append(full, scriptPath)
-		full = append(full, args...)
+
+		// O processo do host criado pelo flatpak-spawn recebe os file descriptors
+		// reais do terminal, mas fica numa sessão nova, sem terminal de controle
+		// (não tem /dev/tty). whiptail/ncurses funcionam mesmo assim (usam os fds
+		// herdados direto), mas qualquer TUI baseada em Bubbletea — como o `gum`
+		// que o ai-cli-uninstaller.sh usa — abre /dev/tty explicitamente pra ler
+		// teclado, e isso falha com "no such device or address" sem terminal de
+		// controle: o script então recebia erro na primeira interação e voltava
+		// na hora. `script -qec "..." /dev/null` roda o comando numa sessão nova
+		// com um pty próprio (que ganha terminal de controle de verdade), o que
+		// resolve os dois casos — por isso é usado sempre, não só pro gum.
+		inner := shellJoin(append([]string{scriptPath}, args...))
+		full = append(full, "script", "-qec", inner, "/dev/null")
 		return exec.Command("flatpak-spawn", full...)
 	}
 	return exec.Command(scriptPath, args...)
+}
+
+func shellJoin(parts []string) string {
+	quoted := make([]string, len(parts))
+	for i, p := range parts {
+		quoted[i] = "'" + strings.ReplaceAll(p, "'", `'\''`) + "'"
+	}
+	return strings.Join(quoted, " ")
 }
