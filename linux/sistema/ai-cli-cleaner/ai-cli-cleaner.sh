@@ -1,12 +1,18 @@
 #!/usr/bin/env bash
 #
-# ai-cli-cleaner.sh — detecta e remove CLIs de IA instaladas no sistema (Linux).
+# ai-cli-cleaner.sh — detecta CLIs de IA instaladas no sistema (Linux) e permite:
+#   1) remoção completa (desinstala pacote + apaga config/cache/dados)
+#   2) apagar só arquivos temporários/cache (mantém a ferramenta instalada)
+# de uma ou várias ferramentas detectadas.
+#
 # Documentação: docs/linux/sistema/ai-cli-cleaner.md
 #
 # Uso:
-#   ./ai-cli-cleaner.sh            fluxo interativo completo
-#   ./ai-cli-cleaner.sh --scan     só escaneia e mostra o relatório
-#   ./ai-cli-cleaner.sh --dry-run  roda o fluxo todo sem alterar nada
+#   ./ai-cli-cleaner.sh                 fluxo interativo completo (pergunta o modo)
+#   ./ai-cli-cleaner.sh --mode=clean    vai direto pro modo "só cache/temporários"
+#   ./ai-cli-cleaner.sh --mode=full     vai direto pro modo "remoção completa"
+#   ./ai-cli-cleaner.sh --scan          só escaneia e mostra o relatório
+#   ./ai-cli-cleaner.sh --dry-run       roda o fluxo todo sem alterar nada
 #   ./ai-cli-cleaner.sh --help
 
 set -uo pipefail
@@ -24,26 +30,30 @@ LOG_FILE="$LOG_DIR/ai-cli-cleaner-$TIMESTAMP.log"
 DRY_RUN=0
 SCAN_ONLY=0
 ASSUME_YES=0
+MODE=""   # "full" | "clean" — se vazio, pergunta interativamente
 
-# id|Nome de exibição|binários(csv)|pacotes npm(csv)|pacotes pip/pipx(csv)|diretórios(csv)
+# id|Nome de exibição|binários(csv)|pacotes npm(csv)|pacotes pip/pipx(csv)|dirs de cache/temp(csv)|dirs de config/dados(csv)
+#
+# "cache" = seguro apagar sem perder login/config (é regenerado pela ferramenta).
+# "config" = contém credenciais/configuração/dados — só é apagado na remoção completa.
 TOOLS=(
-  "claude|Claude Code (Anthropic)|claude|@anthropic-ai/claude-code||$HOME/.claude,$HOME/.claude.json,$HOME/.config/claude,$HOME/.cache/claude,$HOME/.local/share/claude"
-  "gemini|Gemini CLI (Google)|gemini|@google/gemini-cli||$HOME/.gemini,$HOME/.config/gemini,$HOME/.cache/gemini,$HOME/.local/share/gemini"
-  "antigravity|Antigravity (Google)|antigravity|||$HOME/.antigravity,$HOME/.config/antigravity,$HOME/.config/Antigravity,$HOME/.cache/antigravity,$HOME/.local/share/antigravity"
-  "kimi|Kimi CLI (Moonshot AI)|kimi|kimi-cli,@moonshot-ai/kimi-cli||$HOME/.kimi,$HOME/.config/kimi,$HOME/.cache/kimi"
-  "codex|Codex CLI (OpenAI)|codex|@openai/codex||$HOME/.codex,$HOME/.config/codex,$HOME/.cache/codex"
-  "copilot|GitHub Copilot CLI|copilot,gh-copilot|@githubnext/github-copilot-cli||$HOME/.copilot,$HOME/.config/gh-copilot,$HOME/.config/github-copilot"
-  "cursor-agent|Cursor CLI|cursor-agent|||$HOME/.cursor,$HOME/.config/Cursor,$HOME/.config/cursor-agent"
-  "aider|Aider|aider||aider-chat|$HOME/.aider,$HOME/.aider.conf.yml,$HOME/.aider.tags.cache.v3,$HOME/.config/aider,$HOME/.cache/aider"
-  "q|Amazon Q CLI|q||amazon-q-cli|$HOME/.config/amazon-q,$HOME/.local/share/amazon-q"
-  "qwen|Qwen Code CLI|qwen|@qwen-code/qwen-code||$HOME/.qwen,$HOME/.config/qwen,$HOME/.cache/qwen"
-  "opencode|opencode|opencode||opencode-ai|$HOME/.opencode,$HOME/.config/opencode,$HOME/.local/share/opencode"
-  "goose|Goose (Block)|goose|||$HOME/.config/goose,$HOME/.local/share/goose,$HOME/.cache/goose"
-  "ollama|Ollama|ollama|||$HOME/.ollama"
-  "interpreter|Open Interpreter|interpreter||open-interpreter|$HOME/.interpreter,$HOME/.config/open-interpreter,$HOME/.cache/open-interpreter,$HOME/.local/share/open-interpreter"
-  "llm|llm (Simon Willison)|llm||llm|$HOME/.config/io.datasette.llm"
-  "grok|Grok CLI (xAI)|grok|@xai/grok-cli||$HOME/.grok,$HOME/.config/grok"
-  "deepseek|DeepSeek CLI|deepseek|deepseek-cli||$HOME/.deepseek,$HOME/.config/deepseek"
+  "claude|Claude Code (Anthropic)|claude|@anthropic-ai/claude-code||$HOME/.cache/claude|$HOME/.claude,$HOME/.claude.json,$HOME/.config/claude,$HOME/.local/share/claude"
+  "gemini|Gemini CLI (Google)|gemini|@google/gemini-cli||$HOME/.cache/gemini|$HOME/.gemini,$HOME/.config/gemini,$HOME/.local/share/gemini"
+  "antigravity|Antigravity (Google)|antigravity|||$HOME/.cache/antigravity|$HOME/.antigravity,$HOME/.config/antigravity,$HOME/.config/Antigravity,$HOME/.local/share/antigravity"
+  "kimi|Kimi CLI (Moonshot AI)|kimi|kimi-cli,@moonshot-ai/kimi-cli||$HOME/.cache/kimi|$HOME/.kimi,$HOME/.config/kimi"
+  "codex|Codex CLI (OpenAI)|codex|@openai/codex||$HOME/.cache/codex|$HOME/.codex,$HOME/.config/codex"
+  "copilot|GitHub Copilot CLI|copilot,gh-copilot|@githubnext/github-copilot-cli|||$HOME/.copilot,$HOME/.config/gh-copilot,$HOME/.config/github-copilot"
+  "cursor-agent|Cursor CLI|cursor-agent|||$HOME/.cache/cursor-agent|$HOME/.cursor,$HOME/.config/Cursor,$HOME/.config/cursor-agent"
+  "aider|Aider|aider||aider-chat|$HOME/.cache/aider,$HOME/.aider.tags.cache.v3|$HOME/.aider,$HOME/.aider.conf.yml,$HOME/.config/aider"
+  "q|Amazon Q CLI|q||amazon-q-cli||$HOME/.config/amazon-q,$HOME/.local/share/amazon-q"
+  "qwen|Qwen Code CLI|qwen|@qwen-code/qwen-code||$HOME/.cache/qwen|$HOME/.qwen,$HOME/.config/qwen"
+  "opencode|opencode|opencode||opencode-ai||$HOME/.opencode,$HOME/.config/opencode,$HOME/.local/share/opencode"
+  "goose|Goose (Block)|goose|||$HOME/.cache/goose|$HOME/.config/goose,$HOME/.local/share/goose"
+  "ollama|Ollama|ollama|||$HOME/.ollama/models|$HOME/.ollama"
+  "interpreter|Open Interpreter|interpreter||open-interpreter|$HOME/.cache/open-interpreter|$HOME/.interpreter,$HOME/.config/open-interpreter,$HOME/.local/share/open-interpreter"
+  "llm|llm (Simon Willison)|llm||llm||$HOME/.config/io.datasette.llm"
+  "grok|Grok CLI (xAI)|grok|@xai/grok-cli||$HOME/.cache/grok|$HOME/.grok,$HOME/.config/grok"
+  "deepseek|DeepSeek CLI|deepseek|deepseek-cli||$HOME/.cache/deepseek|$HOME/.deepseek,$HOME/.config/deepseek"
 )
 
 HAS_WHIPTAIL=0
@@ -53,9 +63,10 @@ NPM_GLOBAL_LIST=""
 PIP_LIST=""
 PIPX_LIST=""
 
-# resultados da varredura: tool_id -> lista de evidências (uma por linha, campo\tcampo)
-declare -A FOUND_EVIDENCE
-declare -A FOUND_SIZE
+# resultados da varredura
+declare -A FOUND_EVIDENCE     # id -> linhas "kind|ref|extra"
+declare -A FOUND_SIZE         # id -> tamanho total (cache+config)
+declare -A FOUND_CACHE_SIZE   # id -> tamanho só do cache/temp ("-" se não achou nada)
 
 # ---------------------------------------------------------------------------
 # Helpers de log / saída
@@ -73,14 +84,17 @@ err()  { printf '\033[1;31m[ERRO]\033[0m %s\n' "$1" >&2; log "ERRO: $1"; }
 
 usage() {
   cat <<'EOF'
-ai-cli-cleaner.sh — detecta e remove CLIs de IA instaladas no sistema.
+ai-cli-cleaner.sh — detecta CLIs de IA instaladas e permite remover tudo ou
+só limpar cache/temporários, de uma ou várias ferramentas.
 
 Uso:
-  ./ai-cli-cleaner.sh            fluxo interativo completo
-  ./ai-cli-cleaner.sh --scan     só escaneia e mostra o relatório, não remove nada
-  ./ai-cli-cleaner.sh --dry-run  roda o fluxo todo mas só mostra o que faria
-  ./ai-cli-cleaner.sh --yes      pula a confirmação por escrito (ainda pergunta y/n)
-  ./ai-cli-cleaner.sh --help     mostra esta ajuda
+  ./ai-cli-cleaner.sh                 fluxo interativo completo
+  ./ai-cli-cleaner.sh --mode=clean    só apagar cache/temporários (mantém instalado)
+  ./ai-cli-cleaner.sh --mode=full     remoção completa (desinstala + apaga tudo)
+  ./ai-cli-cleaner.sh --scan          só escaneia e mostra o relatório, não altera nada
+  ./ai-cli-cleaner.sh --dry-run       roda o fluxo todo mas só mostra o que faria
+  ./ai-cli-cleaner.sh --yes           pula a confirmação por escrito (ainda pergunta y/n)
+  ./ai-cli-cleaner.sh --help          mostra esta ajuda
 EOF
 }
 
@@ -93,6 +107,8 @@ for arg in "$@"; do
     --scan) SCAN_ONLY=1 ;;
     --dry-run) DRY_RUN=1 ;;
     --yes) ASSUME_YES=1 ;;
+    --mode=full) MODE="full" ;;
+    --mode=clean) MODE="clean" ;;
     -h|--help) usage; exit 0 ;;
     *) err "Argumento desconhecido: $arg"; usage; exit 1 ;;
   esac
@@ -131,9 +147,9 @@ human_size() {
 }
 
 scan_tool() {
-  local id="$1" bins="$2" npm_pkgs="$3" pip_pkgs="$4" dirs="$5"
+  local id="$1" bins="$2" npm_pkgs="$3" pip_pkgs="$4" cache_dirs="$5" config_dirs="$6"
   local evidence=()
-  local total_size_arg=()
+  local all_paths=() cache_paths=()
 
   local b
   IFS=',' read -ra bin_arr <<<"$bins"
@@ -169,21 +185,36 @@ scan_tool() {
   fi
 
   local d
-  IFS=',' read -ra dir_arr <<<"$dirs"
+  IFS=',' read -ra dir_arr <<<"$cache_dirs"
   for d in "${dir_arr[@]}"; do
     [[ -z "$d" ]] && continue
     if [[ -e "$d" ]]; then
-      evidence+=("path|$d|$(human_size "$d")")
-      total_size_arg+=("$d")
+      evidence+=("cache|$d|$(human_size "$d")")
+      cache_paths+=("$d")
+      all_paths+=("$d")
+    fi
+  done
+
+  IFS=',' read -ra dir_arr <<<"$config_dirs"
+  for d in "${dir_arr[@]}"; do
+    [[ -z "$d" ]] && continue
+    if [[ -e "$d" ]]; then
+      evidence+=("cfg|$d|$(human_size "$d")")
+      all_paths+=("$d")
     fi
   done
 
   if [[ "${#evidence[@]}" -gt 0 ]]; then
     FOUND_EVIDENCE["$id"]="$(printf '%s\n' "${evidence[@]}")"
-    if [[ "${#total_size_arg[@]}" -gt 0 ]]; then
-      FOUND_SIZE["$id"]="$(du -ch "${total_size_arg[@]}" 2>/dev/null | tail -1 | cut -f1)"
+    if [[ "${#all_paths[@]}" -gt 0 ]]; then
+      FOUND_SIZE["$id"]="$(du -ch "${all_paths[@]}" 2>/dev/null | tail -1 | cut -f1)"
     else
       FOUND_SIZE["$id"]="-"
+    fi
+    if [[ "${#cache_paths[@]}" -gt 0 ]]; then
+      FOUND_CACHE_SIZE["$id"]="$(du -ch "${cache_paths[@]}" 2>/dev/null | tail -1 | cut -f1)"
+    else
+      FOUND_CACHE_SIZE["$id"]="-"
     fi
   fi
 }
@@ -192,10 +223,10 @@ run_scan() {
   info "Coletando listas de pacotes (npm/pip/pipx)..."
   collect_global_lists
   info "Varrendo o sistema em busca de CLIs de IA conhecidas..."
-  local entry id display bins npm_pkgs pip_pkgs dirs
+  local entry id display bins npm_pkgs pip_pkgs cache_dirs config_dirs
   for entry in "${TOOLS[@]}"; do
-    IFS='|' read -r id display bins npm_pkgs pip_pkgs dirs <<<"$entry"
-    scan_tool "$id" "$bins" "$npm_pkgs" "$pip_pkgs" "$dirs"
+    IFS='|' read -r id display bins npm_pkgs pip_pkgs cache_dirs config_dirs <<<"$entry"
+    scan_tool "$id" "$bins" "$npm_pkgs" "$pip_pkgs" "$cache_dirs" "$config_dirs"
   done
 }
 
@@ -208,13 +239,25 @@ tool_display_name() {
 }
 
 tool_fields() {
-  # imprime bins/npm_pkgs/pip_pkgs/dirs (separados por \n) para um id
+  # imprime bins/npm_pkgs/pip_pkgs/cache_dirs/config_dirs (uma por linha) para um id
   local id="$1" entry
   for entry in "${TOOLS[@]}"; do
-    IFS='|' read -r eid _ ebins enpm epip edirs <<<"$entry"
+    IFS='|' read -r eid _ ebins enpm epip ecache econfig <<<"$entry"
     if [[ "$eid" == "$id" ]]; then
-      printf '%s\n%s\n%s\n%s\n' "$ebins" "$enpm" "$epip" "$edirs"
+      printf '%s\n%s\n%s\n%s\n%s\n' "$ebins" "$enpm" "$epip" "$ecache" "$econfig"
       return
+    fi
+  done
+}
+
+# ids encontrados elegíveis para o modo atual: "full" = todos; "clean" = só quem tem cache
+eligible_ids() {
+  local mode="$1" id
+  for id in "${!FOUND_EVIDENCE[@]}"; do
+    if [[ "$mode" == "clean" ]]; then
+      [[ "${FOUND_CACHE_SIZE[$id]:--}" != "-" ]] && printf '%s\n' "$id"
+    else
+      printf '%s\n' "$id"
     fi
   done
 }
@@ -228,15 +271,41 @@ print_report() {
     return
   fi
   echo
-  printf '\033[1m%-14s %-32s %-10s %s\033[0m\n' "ID" "FERRAMENTA" "TAMANHO" "EVIDÊNCIAS"
+  printf '\033[1m%-14s %-32s %-10s %-10s %s\033[0m\n' "ID" "FERRAMENTA" "TOTAL" "CACHE" "EVIDÊNCIAS"
   for id in "${!FOUND_EVIDENCE[@]}"; do
-    local display size count
+    local display size cache count
     display="$(tool_display_name "$id")"
     size="${FOUND_SIZE[$id]}"
+    cache="${FOUND_CACHE_SIZE[$id]}"
     count="$(printf '%s\n' "${FOUND_EVIDENCE[$id]}" | grep -c .)"
-    printf '%-14s %-32s %-10s %s evidência(s)\n' "$id" "$display" "$size" "$count"
+    printf '%-14s %-32s %-10s %-10s %s evidência(s)\n' "$id" "$display" "$size" "$cache" "$count"
   done
   echo
+}
+
+# ---------------------------------------------------------------------------
+# Escolha do modo (full / clean)
+# ---------------------------------------------------------------------------
+
+choose_mode() {
+  if [[ -n "$MODE" ]]; then
+    printf '%s' "$MODE"
+    return
+  fi
+  if [[ "$HAS_WHIPTAIL" -eq 1 ]]; then
+    whiptail --title "ai-cli-cleaner" --menu \
+      "O que você quer fazer?" 14 78 2 \
+      "clean" "Apagar só cache/temporários (mantém a ferramenta instalada)" \
+      "full"  "Remoção completa (desinstala o pacote e apaga tudo)" \
+      3>&1 1>&2 2>&3
+  else
+    echo "O que você quer fazer?" >&2
+    echo "  1) Apagar só cache/temporários (mantém a ferramenta instalada)" >&2
+    echo "  2) Remoção completa (desinstala o pacote e apaga tudo)" >&2
+    local resp
+    read -r -p "Escolha [1/2]: " resp
+    [[ "$resp" == "2" ]] && printf 'full' || printf 'clean'
+  fi
 }
 
 # ---------------------------------------------------------------------------
@@ -244,11 +313,12 @@ print_report() {
 # ---------------------------------------------------------------------------
 
 select_tools_whiptail() {
+  # $@ = ids elegíveis
   local args=(--title "ai-cli-cleaner" --checklist \
-    "CLIs de IA encontradas no sistema.\nSelecione (ESPAÇO) as que deseja remover e confirme com TAB/ENTER:" \
+    "Selecione (ESPAÇO) uma ou mais ferramentas e confirme com TAB/ENTER:" \
     20 78 10)
   local id
-  for id in "${!FOUND_EVIDENCE[@]}"; do
+  for id in "$@"; do
     local display size
     display="$(tool_display_name "$id")"
     size="${FOUND_SIZE[$id]}"
@@ -258,16 +328,16 @@ select_tools_whiptail() {
 }
 
 select_tools_plain() {
+  # $@ = ids elegíveis
+  local ids=("$@")
   echo "Ferramentas encontradas:"
-  local ids=() i=1
-  local id
-  for id in "${!FOUND_EVIDENCE[@]}"; do
-    ids+=("$id")
+  local i=1 id
+  for id in "${ids[@]}"; do
     printf '  %d) %s (%s) [%s]\n' "$i" "$(tool_display_name "$id")" "${FOUND_SIZE[$id]}" "$id"
     i=$((i + 1))
   done
   echo
-  read -r -p "Digite os números a remover, separados por espaço (ou 'todos', vazio para cancelar): " choice
+  read -r -p "Digite os números a processar, separados por espaço (ou 'todos', vazio para cancelar): " choice
   [[ -z "$choice" ]] && return
   local selected=()
   if [[ "$choice" == "todos" ]]; then
@@ -305,12 +375,12 @@ run_cmd() {
 }
 
 backup_paths() {
-  local id="$1"
+  local label="$1"
   shift
   local paths=("$@")
   [[ "${#paths[@]}" -eq 0 ]] && return
-  local tmp_dir="$BACKUP_ROOT/${id}-${TIMESTAMP}"
-  local tar_path="$BACKUP_ROOT/${id}-${TIMESTAMP}.tar.gz"
+  local tmp_dir="$BACKUP_ROOT/${label}-${TIMESTAMP}"
+  local tar_path="$BACKUP_ROOT/${label}-${TIMESTAMP}.tar.gz"
   mkdir -p "$tmp_dir"
   local p
   for p in "${paths[@]}"; do
@@ -327,26 +397,52 @@ backup_paths() {
     rmdir "$tmp_dir" 2>/dev/null
     return
   fi
-  if tar -czf "$tar_path" -C "$BACKUP_ROOT" "${id}-${TIMESTAMP}" 2>>"$LOG_FILE"; then
+  if tar -czf "$tar_path" -C "$BACKUP_ROOT" "${label}-${TIMESTAMP}" 2>>"$LOG_FILE"; then
     rm -rf "$tmp_dir"
-    ok "Backup de $id salvo em $tar_path"
+    ok "Backup de $label salvo em $tar_path"
   else
-    warn "Não foi possível compactar o backup de $id — arquivos ficaram em $tmp_dir"
+    warn "Não foi possível compactar o backup de $label — arquivos ficaram em $tmp_dir"
   fi
 }
 
-remove_tool() {
+# modo "clean": só apaga os dirs de cache/temp, não toca em pacote/config/binário
+clean_tool_cache() {
   local id="$1" do_backup="$2"
-  local bins npm_pkgs pip_pkgs dirs
+  local fields cache_dirs
   mapfile -t fields < <(tool_fields "$id")
-  bins="${fields[0]}"; npm_pkgs="${fields[1]}"; pip_pkgs="${fields[2]}"; dirs="${fields[3]}"
+  cache_dirs="${fields[3]}"
 
-  info "=== Removendo: $(tool_display_name "$id") ==="
+  info "=== Limpando cache/temporários: $(tool_display_name "$id") ==="
+
+  local dir_arr=()
+  IFS=',' read -ra dir_arr <<<"$cache_dirs"
 
   if [[ "$do_backup" == "yes" ]]; then
-    local dir_arr=()
-    IFS=',' read -ra dir_arr <<<"$dirs"
-    backup_paths "$id" "${dir_arr[@]}"
+    backup_paths "${id}-clean" "${dir_arr[@]}"
+  fi
+
+  local d
+  for d in "${dir_arr[@]}"; do
+    [[ -z "$d" || ! -e "$d" ]] && continue
+    run_cmd "remover cache $d" rm -rf "$d"
+  done
+}
+
+# modo "full": desinstala pacote, apaga cache+config, remove binário se for seguro
+uninstall_tool_full() {
+  local id="$1" do_backup="$2"
+  local fields bins npm_pkgs pip_pkgs cache_dirs config_dirs
+  mapfile -t fields < <(tool_fields "$id")
+  bins="${fields[0]}"; npm_pkgs="${fields[1]}"; pip_pkgs="${fields[2]}"
+  cache_dirs="${fields[3]}"; config_dirs="${fields[4]}"
+
+  info "=== Removendo por completo: $(tool_display_name "$id") ==="
+
+  if [[ "$do_backup" == "yes" ]]; then
+    local all_dirs=() dir_arr=()
+    IFS=',' read -ra dir_arr <<<"$cache_dirs"; all_dirs+=("${dir_arr[@]}")
+    IFS=',' read -ra dir_arr <<<"$config_dirs"; all_dirs+=("${dir_arr[@]}")
+    backup_paths "${id}-full" "${all_dirs[@]}"
   fi
 
   local p
@@ -377,7 +473,7 @@ remove_tool() {
   fi
 
   local dir_arr=()
-  IFS=',' read -ra dir_arr <<<"$dirs"
+  IFS=',' read -ra dir_arr <<<"$cache_dirs,$config_dirs"
   local d
   for d in "${dir_arr[@]}"; do
     [[ -z "$d" || ! -e "$d" ]] && continue
@@ -403,12 +499,43 @@ remove_tool() {
 }
 
 # ---------------------------------------------------------------------------
+# Resumo antes da confirmação
+# ---------------------------------------------------------------------------
+
+print_summary() {
+  local mode="$1"
+  shift
+  local ids=("$@")
+  local id
+  info "Resumo do que será feito (modo: $mode):"
+  for id in "${ids[@]}"; do
+    echo
+    printf '\033[1m%s (%s)\033[0m\n' "$(tool_display_name "$id")" "$id"
+    printf '%s\n' "${FOUND_EVIDENCE[$id]}" | while IFS='|' read -r kind ref extra; do
+      if [[ "$mode" == "clean" ]]; then
+        [[ "$kind" == "cache" ]] && echo "  - apagar cache/temporários: $ref ($extra)"
+        continue
+      fi
+      case "$kind" in
+        bin)   echo "  - remover binário: $extra" ;;
+        npm)   echo "  - npm uninstall -g $ref" ;;
+        pip)   echo "  - pip uninstall -y $ref" ;;
+        pipx)  echo "  - pipx uninstall $ref" ;;
+        cache) echo "  - apagar cache/temporários: $ref ($extra)" ;;
+        cfg)   echo "  - apagar config/dados: $ref ($extra)" ;;
+      esac
+    done
+  done
+  echo
+}
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
 main() {
   mkdir -p "$STATE_DIR" "$LOG_DIR" "$BACKUP_ROOT"
-  log "=== Início da execução (dry_run=$DRY_RUN scan_only=$SCAN_ONLY) ==="
+  log "=== Início da execução (dry_run=$DRY_RUN scan_only=$SCAN_ONLY mode=$MODE) ==="
 
   run_scan
   print_report
@@ -417,38 +544,36 @@ main() {
     exit 0
   fi
 
+  local mode
+  mode="$(choose_mode)"
+  if [[ "$mode" != "full" && "$mode" != "clean" ]]; then
+    warn "Cancelado."
+    exit 0
+  fi
+  log "Modo escolhido: $mode"
+
+  mapfile -t ELIGIBLE < <(eligible_ids "$mode")
+  if [[ "${#ELIGIBLE[@]}" -eq 0 ]]; then
+    warn "Nenhuma ferramenta elegível para o modo '$mode' (ex.: nenhum cache/temporário encontrado)."
+    exit 0
+  fi
+
   local selected_raw
   if [[ "$HAS_WHIPTAIL" -eq 1 ]]; then
-    selected_raw="$(select_tools_whiptail)" || { warn "Cancelado."; exit 0; }
-    # whiptail devolve tags entre aspas duplas, separadas por espaço
+    selected_raw="$(select_tools_whiptail "${ELIGIBLE[@]}")" || { warn "Cancelado."; exit 0; }
     selected_raw="$(tr -d '"' <<<"$selected_raw")"
   else
-    selected_raw="$(select_tools_plain)"
+    selected_raw="$(select_tools_plain "${ELIGIBLE[@]}")"
   fi
 
   read -ra SELECTED <<<"$selected_raw"
   if [[ "${#SELECTED[@]}" -eq 0 ]]; then
-    warn "Nenhuma ferramenta selecionada. Nada será removido."
+    warn "Nenhuma ferramenta selecionada. Nada será feito."
     exit 0
   fi
 
   echo
-  info "Resumo do que será feito:"
-  local id
-  for id in "${SELECTED[@]}"; do
-    echo
-    printf '\033[1m%s (%s)\033[0m\n' "$(tool_display_name "$id")" "$id"
-    printf '%s\n' "${FOUND_EVIDENCE[$id]}" | while IFS='|' read -r kind ref extra; do
-      case "$kind" in
-        bin)  echo "  - remover binário: $extra" ;;
-        npm)  echo "  - npm uninstall -g $ref" ;;
-        pip)  echo "  - pip uninstall -y $ref" ;;
-        pipx) echo "  - pipx uninstall $ref" ;;
-        path) echo "  - apagar diretório/arquivo: $ref ($extra)" ;;
-      esac
-    done
-  done
-  echo
+  print_summary "$mode" "${SELECTED[@]}"
 
   local do_backup="no"
   if [[ "$HAS_WHIPTAIL" -eq 1 ]]; then
@@ -463,15 +588,20 @@ main() {
   if [[ "$ASSUME_YES" -ne 1 ]]; then
     echo
     warn "Esta ação é DESTRUTIVA e, sem backup, IRREVERSÍVEL."
-    read -r -p "Digite APAGAR para confirmar a remoção acima: " confirm
+    read -r -p "Digite APAGAR para confirmar a operação acima: " confirm
     if [[ "$confirm" != "APAGAR" ]]; then
       warn "Confirmação não corresponde a 'APAGAR'. Operação cancelada."
       exit 0
     fi
   fi
 
+  local id
   for id in "${SELECTED[@]}"; do
-    remove_tool "$id" "$do_backup"
+    if [[ "$mode" == "clean" ]]; then
+      clean_tool_cache "$id" "$do_backup"
+    else
+      uninstall_tool_full "$id" "$do_backup"
+    fi
   done
 
   echo
