@@ -1,7 +1,7 @@
 id: io.github.dev_hpro.Scriptman
 
 runtime: org.freedesktop.Platform
-runtime-version: "24.08"
+runtime-version: "25.08"
 sdk: org.freedesktop.Sdk
 sdk-extensions:
   - org.freedesktop.Sdk.Extension.golang
@@ -36,9 +36,9 @@ modules:
     build-commands:
       - go build -mod=vendor -o scriptman .
       - install -Dm755 scriptman /app/bin/scriptman
-      - install -Dm644 io.github.dev_hpro.Scriptman.desktop /app/share/applications/io.github.dev_hpro.Scriptman.desktop
-      - install -Dm644 io.github.dev_hpro.Scriptman.metainfo.xml /app/share/metainfo/io.github.dev_hpro.Scriptman.metainfo.xml
-      - install -Dm644 icon.svg /app/share/icons/hicolor/scalable/apps/io.github.dev_hpro.Scriptman.svg
+      - install -Dm644 flatpak/io.github.dev_hpro.Scriptman.desktop /app/share/applications/io.github.dev_hpro.Scriptman.desktop
+      - install -Dm644 flatpak/io.github.dev_hpro.Scriptman.metainfo.xml /app/share/metainfo/io.github.dev_hpro.Scriptman.metainfo.xml
+      - install -Dm644 flatpak/icon.svg /app/share/icons/hicolor/scalable/apps/io.github.dev_hpro.Scriptman.svg
     sources:
       - type: dir
         path: ..
