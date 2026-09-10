@@ -419,7 +419,7 @@ select_items_gum() {
   done
   height=$(( ${#options[@]} < 15 ? ${#options[@]} + 1 : 15 ))
   printf '%s\n' "${options[@]}" | gum choose --no-limit --height="$height" \
-    --header="Selecione (ESPAÇO) os itens a apagar/desinstalar e confirme com ENTER:" \
+    --header="Selecione (X) os itens a apagar/desinstalar e confirme com ENTER:" \
     --cursor.foreground=212 --selected.foreground=212 --header.foreground=99
 }
 
