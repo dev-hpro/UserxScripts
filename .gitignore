@@ -1,0 +1,8 @@
+# estado local do ai-cli-cleaner (logs/backups não devem ir pro repo)
+*.log
+
+# Obsidian
+docs/.obsidian/
+
+# diversos
+.DS_Store
